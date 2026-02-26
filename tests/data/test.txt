@@ -1,0 +1,3 @@
+This is a text file that should be rejected by our data loader.
+It's not in a supported format (CSV, JSON, or Excel).
+The loader should raise a ValueError when trying to load this file. 
