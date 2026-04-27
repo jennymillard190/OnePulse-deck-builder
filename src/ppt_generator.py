@@ -13,6 +13,35 @@ import re
 # Configure logging
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
+def clean_chart_title(title: str) -> str:
+    """
+    Remove prefixes like 'Q(4)' and 'Question:' from chart titles.
+    """
+    title = str(title).strip()
+    title = re.sub(r'^Question:\s*', '', title, flags=re.IGNORECASE)
+    title = re.sub(r'^Q\(\d+\)\s*', '', title, flags=re.IGNORECASE)
+    return title.strip()
+
+def apply_chart_title(chart, title: str) -> None:
+    clean_title = clean_chart_title(title)
+    chart.chart_title.text_frame.text = clean_title
+    p = chart.chart_title.text_frame.paragraphs[0]
+    p.font.name = 'Calibri'
+    p.font.size = Pt(12)
+    p.font.italic = True
+    p.font.color.rgb = RGBColor(0,0,0)
+
+def add_source_footer(slide, prs, text: str) -> None:
+    """
+    Move source slightly up and right so it sits in the white space.
+    """
+    y = prs.slide_height - Inches(config.FOOTER_OFFSET) - Inches(0.55)
+    tx = slide.shapes.add_textbox(Inches(0.75), y, Inches(8), Inches(0.3))
+    pf = tx.text_frame.paragraphs[0]
+    pf.text = text
+    pf.font.name = 'Calibri'
+    pf.font.size = Pt(10)
+    pf.font.color.rgb = RGBColor(0,0,0)
 
 def get_layout(prs: Presentation, name: str = "8_UPFRONT 3"):
     """Get a slide layout by name, falling back to a default if not found."""
@@ -191,22 +220,8 @@ def add_raw_audience_slides(
             series = [(label, vals)]
             slide, chart = create_chart_slide(prs, categories, series)
             
-            # Set title
-            chart.chart_title.text_frame.text = f"{title} ({label})"
-            p = chart.chart_title.text_frame.paragraphs[0]
-            p.font.name = 'Calibri'
-            p.font.size = Pt(12)
-            p.font.italic = True
-            p.font.color.rgb = RGBColor(0,0,0)
-            
-            # Add footer
-            y = prs.slide_height - Inches(config.FOOTER_OFFSET) - Inches(0.4)  # Move up by 0.4 inches
-            tx = slide.shapes.add_textbox(Inches(0.5), y, Inches(8), Inches(0.3))
-            pf = tx.text_frame.paragraphs[0]
-            pf.text = f"Source: OnePulse, {label} ({n_resp})"
-            pf.font.name = 'Calibri'
-            pf.font.size = Pt(10)
-            pf.font.color.rgb = RGBColor(0,0,0)
+            apply_chart_title(chart, title)
+            add_source_footer(slide, prs, f"Source: OnePulse, {label} ({n_resp})")
             
     return prs
 
@@ -217,36 +232,21 @@ def add_combined_slides_full_export(
 ) -> Presentation:
     """Add combined slides for full export: all segments + groups + individual segments."""
     group_audience_names = group_audience_names or set()
+
     for title, categories, segments in combined_data:
-        # Create series list from all segments
         series_list = []
         footer_parts = ["Source: OnePulse"]
-        
+
         for label, vals, n_resp in segments:
             series_list.append((label, vals))
             footer_parts.append(f"{label} ({n_resp})")
-        
-        # Add the main combined slide with all segments
+
+        # Main combined slide
         slide, chart = create_chart_slide(prs, categories, series_list)
-        
-        # Set title
-        chart.chart_title.text_frame.text = f"{title} ({', '.join(label for label, _, _ in segments)})"
-        p = chart.chart_title.text_frame.paragraphs[0]
-        p.font.name = 'Calibri'
-        p.font.size = Pt(12)
-        p.font.italic = True
-        p.font.color.rgb = RGBColor(0,0,0)
-        
-        # Add footer
-        y = prs.slide_height - Inches(config.FOOTER_OFFSET) - Inches(0.4)  # Move up by 0.4 inches
-        tx = slide.shapes.add_textbox(Inches(0.5), y, Inches(8), Inches(0.3))
-        pf = tx.text_frame.paragraphs[0]
-        pf.text = ', '.join(footer_parts)
-        pf.font.name = 'Calibri'
-        pf.font.size = Pt(10)
-        pf.font.color.rgb = RGBColor(0,0,0)
-        
-        # Add group slides first (if any)
+        apply_chart_title(chart, title)
+        add_source_footer(slide, prs, ', '.join(footer_parts))
+
+        # Group slides first (if any)
         group_segments = [s for s in segments if s[0] != "Total" and " - " in title]
         if group_segments:
             for label, vals, n_resp in group_segments:
@@ -257,31 +257,20 @@ def add_combined_slides_full_export(
                         (label, vals)
                     ]
                     slide, chart = create_chart_slide(prs, categories, segment_series)
-                    chart.chart_title.text_frame.text = f"{title} ({label})"
-                    p = chart.chart_title.text_frame.paragraphs[0]
-                    p.font.name = 'Calibri'
-                    p.font.size = Pt(12)
-                    p.font.italic = True
-                    p.font.color.rgb = RGBColor(0,0,0)
-                    y = prs.slide_height - Inches(config.FOOTER_OFFSET) - Inches(0.4)
-                    tx = slide.shapes.add_textbox(Inches(0.5), y, Inches(8), Inches(0.3))
-                    pf = tx.text_frame.paragraphs[0]
-                    pf.text = f"Source: OnePulse, {label} ({n_resp}), Total ({total_segment[2]})"
-                    pf.font.name = 'Calibri'
-                    pf.font.size = Pt(10)
-                    pf.font.color.rgb = RGBColor(0,0,0)
-        
-        # Add individual segment slides (for ungrouped audiences)
+                    apply_chart_title(chart, title)
+                    add_source_footer(
+                        slide,
+                        prs,
+                        f"Source: OnePulse, {label} ({n_resp}), Total ({total_segment[2]})"
+                    )
+
+        # Individual segment slides (for ungrouped audiences)
         non_total_segments = [s for s in segments if s[0] != "Total"]
-        is_group_chart = " - " in title  # Check if this is a group chart
+        is_group_chart = " - " in title
         is_individual_chart = title.endswith(")")
-        
+
         if len(non_total_segments) > 1 and not is_group_chart and not is_individual_chart:
-            total_segment = None
-            for label, vals, n_resp in segments:
-                if label == "Total":
-                    total_segment = (label, vals, n_resp)
-                    break
+            total_segment = next((s for s in segments if s[0] == "Total"), None)
             if total_segment:
                 for label, vals, n_resp in segments:
                     if label != "Total" and label not in group_audience_names:
@@ -290,19 +279,13 @@ def add_combined_slides_full_export(
                             (label, vals)
                         ]
                         slide, chart = create_chart_slide(prs, categories, segment_series)
-                        chart.chart_title.text_frame.text = f"{title} ({label} vs Total)"
-                        p = chart.chart_title.text_frame.paragraphs[0]
-                        p.font.name = 'Calibri'
-                        p.font.size = Pt(12)
-                        p.font.italic = True
-                        p.font.color.rgb = RGBColor(0,0,0)
-                        y = prs.slide_height - Inches(config.FOOTER_OFFSET) - Inches(0.4)
-                        tx = slide.shapes.add_textbox(Inches(0.5), y, Inches(8), Inches(0.3))
-                        pf = tx.text_frame.paragraphs[0]
-                        pf.text = f"Source: OnePulse, {label} ({n_resp}), Total ({total_segment[2]})"
-                        pf.font.name = 'Calibri'
-                        pf.font.size = Pt(10)
-                        pf.font.color.rgb = RGBColor(0,0,0)
+                        apply_chart_title(chart, title)
+                        add_source_footer(
+                            slide,
+                            prs,
+                            f"Source: OnePulse, {label} ({n_resp}), Total ({total_segment[2]})"
+                        )
+
     return prs
 
 
@@ -316,12 +299,13 @@ def add_combined_slides_condensed_export(
     """Add combined slides for condensed export: groups + ungrouped only (no duplication)."""
     group_audience_names = group_audience_names or set()
     ungrouped_audiences = set()
+
     if audience_defs:
         grouped_audiences = set()
         for group in audience_defs.get("__groups__", []):
             grouped_audiences.update(group.get("audiences", []))
         ungrouped_audiences = set(audience_defs.keys()) - grouped_audiences - {"__groups__"}
-    
+
     # If no audiences are defined, show Total charts only
     if (not audience_defs or (len(audience_defs) == 1 and '__groups__' in audience_defs)) and raw_audience_data:
         for title, categories, segments in raw_audience_data:
@@ -329,20 +313,100 @@ def add_combined_slides_condensed_export(
                 total_segment = segments[0]
                 segment_series = [(total_segment[0], total_segment[1])]
                 slide, chart = create_chart_slide(prs, categories, segment_series)
-                chart.chart_title.text_frame.text = title
-                p = chart.chart_title.text_frame.paragraphs[0]
-                p.font.name = 'Calibri'
-                p.font.size = Pt(12)
-                p.font.italic = True
-                p.font.color.rgb = RGBColor(0,0,0)
-                y = prs.slide_height - Inches(config.FOOTER_OFFSET) - Inches(0.4)
-                tx = slide.shapes.add_textbox(Inches(0.5), y, Inches(8), Inches(0.3))
-                pf = tx.text_frame.paragraphs[0]
-                pf.text = f"Source: OnePulse, Total ({total_segment[2]})"
-                pf.font.name = 'Calibri'
-                pf.font.size = Pt(10)
-                pf.font.color.rgb = RGBColor(0,0,0)
+                apply_chart_title(chart, title)
+                add_source_footer(slide, prs, f"Source: OnePulse, Total ({total_segment[2]})")
         return prs
+
+    slide_count = 0
+
+    for title, categories, segments in combined_data:
+        is_group_chart = " - " in title
+        is_individual_chart = re.search(r"\([^)]+\)$", title) and not is_group_chart
+        non_total_segments = [s for s in segments if s[0] != "Total"]
+
+        if is_group_chart:
+            group_name = title.split(" - ")[-1].strip()
+            group_members = []
+
+            if audience_defs:
+                for group in audience_defs.get("__groups__", []):
+                    if group["name"] == group_name:
+                        group_members = group.get("audiences", [])
+                        break
+
+            total_segment = next((s for s in segments if s[0] == "Total"), None)
+            group_segments = [s for s in segments if s[0] != "Total" and s[0] in group_members]
+
+            if total_segment and group_segments:
+                segment_series = [(total_segment[0], total_segment[1])]
+                group_labels = []
+                total_group_resp = 0
+
+                for label, vals, n_resp in group_segments:
+                    segment_series.append((label, vals))
+                    group_labels.append(label)
+                    total_group_resp += n_resp
+
+                combined_group_label = " & ".join(group_labels)
+                slide, chart = create_chart_slide(prs, categories, segment_series)
+                apply_chart_title(chart, title)
+                add_source_footer(
+                    slide,
+                    prs,
+                    f"Source: OnePulse, {combined_group_label} ({total_group_resp}), Total ({total_segment[2]})"
+                )
+                slide_count += 1
+
+            continue
+
+        # Skip "all segments" charts
+        if not is_group_chart and not is_individual_chart and len(non_total_segments) > 1:
+            continue
+
+        # Process individual charts for ungrouped audiences
+        if is_individual_chart:
+            total_segment = next((s for s in segments if s[0] == "Total"), None)
+            if total_segment and len(segments) == 2:
+                audience_segment = segments[1]
+                label, vals, n_resp = audience_segment
+
+                if not audience_defs or label in ungrouped_audiences:
+                    segment_series = [
+                        (total_segment[0], total_segment[1]),
+                        (label, vals)
+                    ]
+                    slide, chart = create_chart_slide(prs, categories, segment_series)
+                    apply_chart_title(chart, title)
+                    add_source_footer(
+                        slide,
+                        prs,
+                        f"Source: OnePulse, {label} ({n_resp}), Total ({total_segment[2]})"
+                    )
+                    slide_count += 1
+            continue
+
+        total_segment = next((s for s in segments if s[0] == "Total"), None)
+        if total_segment:
+            ungrouped_segments = [
+                s for s in segments
+                if s[0] != "Total" and (not audience_defs or s[0] in ungrouped_audiences)
+            ]
+
+            for label, vals, n_resp in ungrouped_segments:
+                segment_series = [
+                    (total_segment[0], total_segment[1]),
+                    (label, vals)
+                ]
+                slide, chart = create_chart_slide(prs, categories, segment_series)
+                apply_chart_title(chart, title)
+                add_source_footer(
+                    slide,
+                    prs,
+                    f"Source: OnePulse, {label} ({n_resp}), Total ({total_segment[2]})"
+                )
+                slide_count += 1
+
+    return prs
     
     slide_count = 0
     for title, categories, segments in combined_data:
@@ -371,16 +435,8 @@ def add_combined_slides_condensed_export(
                     total_group_resp += n_resp
                 combined_group_label = " & ".join(group_labels)
                 slide, chart = create_chart_slide(prs, categories, segment_series)
-                chart.chart_title.text_frame.text = f"{title} ({combined_group_label})"
-                p = chart.chart_title.text_frame.paragraphs[0]
-                p.font.name = 'Calibri'
-                p.font.size = Pt(12)
-                p.font.italic = True
-                p.font.color.rgb = RGBColor(0,0,0)
-                y = prs.slide_height - Inches(config.FOOTER_OFFSET) - Inches(0.4)
-                tx = slide.shapes.add_textbox(Inches(0.5), y, Inches(8), Inches(0.3))
-                pf = tx.text_frame.paragraphs[0]
-                pf.text = f"Source: OnePulse, {combined_group_label} ({total_group_resp}), Total ({total_segment[2]})"
+                apply_chart_title(chart, title)
+                add_source_footer(slide, prs, f"Source: OnePulse, {label} ({n_resp}), Total ({total_segment[2]})")
                 pf.font.name = 'Calibri'
                 pf.font.size = Pt(10)
                 pf.font.color.rgb = RGBColor(0,0,0)
@@ -402,43 +458,31 @@ def add_combined_slides_condensed_export(
                         (label, vals)
                     ]
                     slide, chart = create_chart_slide(prs, categories, segment_series)
-                    chart.chart_title.text_frame.text = f"{title} ({label} vs Total)"
-                    p = chart.chart_title.text_frame.paragraphs[0]
-                    p.font.name = 'Calibri'
-                    p.font.size = Pt(12)
-                    p.font.italic = True
-                    p.font.color.rgb = RGBColor(0,0,0)
-                    y = prs.slide_height - Inches(config.FOOTER_OFFSET) - Inches(0.4)
-                    tx = slide.shapes.add_textbox(Inches(0.5), y, Inches(8), Inches(0.3))
-                    pf = tx.text_frame.paragraphs[0]
-                    pf.text = f"Source: OnePulse, {label} ({n_resp}), Total ({total_segment[2]})"
-                    pf.font.name = 'Calibri'
-                    pf.font.size = Pt(10)
-                    pf.font.color.rgb = RGBColor(0,0,0)
-                    slide_count += 1
+                apply_chart_title(chart, title)
+                add_source_footer(slide, prs, f"Source: OnePulse, {label} ({n_resp}), Total ({total_segment[2]})")
+                pf.font.name = 'Calibri'
+                pf.font.size = Pt(10)
+                pf.font.color.rgb = RGBColor(0,0,0)
+                slide_count += 1
             continue
         total_segment = next((s for s in segments if s[0] == "Total"), None)
         if total_segment:
-            ungrouped_segments = [s for s in segments if s[0] != "Total" and (not audience_defs or s[0] in ungrouped_audiences)]
+            ungrouped_segments = [
+                s for s in segments
+                if s[0] != "Total" and (not audience_defs or s[0] in ungrouped_audiences)
+            ]
             for label, vals, n_resp in ungrouped_segments:
                 segment_series = [
                     (total_segment[0], total_segment[1]),
                     (label, vals)
                 ]
                 slide, chart = create_chart_slide(prs, categories, segment_series)
-                chart.chart_title.text_frame.text = f"{title} ({label} vs Total)"
-                p = chart.chart_title.text_frame.paragraphs[0]
-                p.font.name = 'Calibri'
-                p.font.size = Pt(12)
-                p.font.italic = True
-                p.font.color.rgb = RGBColor(0,0,0)
-                y = prs.slide_height - Inches(config.FOOTER_OFFSET) - Inches(0.4)
-                tx = slide.shapes.add_textbox(Inches(0.5), y, Inches(8), Inches(0.3))
-                pf = tx.text_frame.paragraphs[0]
-                pf.text = f"Source: OnePulse, {label} ({n_resp}), Total ({total_segment[2]})"
-                pf.font.name = 'Calibri'
-                pf.font.size = Pt(10)
-                pf.font.color.rgb = RGBColor(0,0,0)
+                apply_chart_title(chart, title)
+                add_source_footer(
+                    slide,
+                    prs,
+                    f"Source: OnePulse, {label} ({n_resp}), Total ({total_segment[2]})"
+                )
                 slide_count += 1
     return prs
 
@@ -450,47 +494,27 @@ def add_combined_slides(
 ) -> Presentation:
     """Add combined slides to the presentation."""
     group_audience_names = group_audience_names or set()
+
     for title, categories, segments in combined_data:
-        # Create series list from all segments
         series_list = []
         footer_parts = ["Source: OnePulse"]
-        
+
         for label, vals, n_resp in segments:
             series_list.append((label, vals))
             footer_parts.append(f"{label} ({n_resp})")
-        
-        # Add the main combined slide with all segments
+
+        # Main combined slide
         slide, chart = create_chart_slide(prs, categories, series_list)
-        
-        # Set title
-        chart.chart_title.text_frame.text = f"{title} ({', '.join(label for label, _, _ in segments)})"
-        p = chart.chart_title.text_frame.paragraphs[0]
-        p.font.name = 'Calibri'
-        p.font.size = Pt(12)
-        p.font.italic = True
-        p.font.color.rgb = RGBColor(0,0,0)
-        
-        # Add footer
-        y = prs.slide_height - Inches(config.FOOTER_OFFSET) - Inches(0.4)  # Move up by 0.4 inches
-        tx = slide.shapes.add_textbox(Inches(0.5), y, Inches(8), Inches(0.3))
-        pf = tx.text_frame.paragraphs[0]
-        pf.text = ', '.join(footer_parts)
-        pf.font.name = 'Calibri'
-        pf.font.size = Pt(10)
-        pf.font.color.rgb = RGBColor(0,0,0)
-        
-        # Only add individual segment slides for all-segments charts (not for individual charts)
-        # All-segments charts: title does not end with ")" and does not contain a group indicator
+        apply_chart_title(chart, title)
+        add_source_footer(slide, prs, ', '.join(footer_parts))
+
+        # Only add individual segment slides for all-segments charts
         non_total_segments = [s for s in segments if s[0] != "Total"]
-        is_group_chart = " - " in title  # Check if this is a group chart
+        is_group_chart = " - " in title
         is_individual_chart = title.endswith(")")
-        
+
         if len(non_total_segments) > 1 and not is_group_chart and not is_individual_chart:
-            total_segment = None
-            for label, vals, n_resp in segments:
-                if label == "Total":
-                    total_segment = (label, vals, n_resp)
-                    break
+            total_segment = next((s for s in segments if s[0] == "Total"), None)
             if total_segment:
                 for label, vals, n_resp in segments:
                     if label != "Total" and label not in group_audience_names:
@@ -499,19 +523,13 @@ def add_combined_slides(
                             (label, vals)
                         ]
                         slide, chart = create_chart_slide(prs, categories, segment_series)
-                        chart.chart_title.text_frame.text = f"{title} ({label} vs Total)"
-                        p = chart.chart_title.text_frame.paragraphs[0]
-                        p.font.name = 'Calibri'
-                        p.font.size = Pt(12)
-                        p.font.italic = True
-                        p.font.color.rgb = RGBColor(0,0,0)
-                        y = prs.slide_height - Inches(config.FOOTER_OFFSET) - Inches(0.4)
-                        tx = slide.shapes.add_textbox(Inches(0.5), y, Inches(8), Inches(0.3))
-                        pf = tx.text_frame.paragraphs[0]
-                        pf.text = f"Source: OnePulse, {label} ({n_resp}), Total ({total_segment[2]})"
-                        pf.font.name = 'Calibri'
-                        pf.font.size = Pt(10)
-                        pf.font.color.rgb = RGBColor(0,0,0)
+                        apply_chart_title(chart, title)
+                        add_source_footer(
+                            slide,
+                            prs,
+                            f"Source: OnePulse, {label} ({n_resp}), Total ({total_segment[2]})"
+                        )
+
     return prs
 
 def add_cover_and_methodology_slides(

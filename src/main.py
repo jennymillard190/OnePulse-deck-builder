@@ -32,7 +32,7 @@ from src.data_processor import (
     identify_open_ended_questions
 )
 from src.ppt_generator import generate_presentation
-
+from src.data_loader import load_file
 def normalize_column_name(col_name):
     """
     Normalize column names for comparison by:
@@ -118,7 +118,17 @@ def process_data(raw_df, audience_defs=None):
     """
     logger.info("\n=== Data Processing Started ===")
     logger.info(f"Loaded spreadsheet with {len(raw_df)} total respondents")
-
+        # Filter out screened-out respondents (only for branching pulses where Q1 is Yes/No)
+    q1_col = [col for col in raw_df.columns if col.startswith('Q(1)') and 'Comments' not in col]
+    if q1_col:
+        q1_values = raw_df[q1_col[0]].astype(str).str.strip().str.lower().unique()
+        is_yes_no = set(q1_values) <= {'yes', 'no', 'nan', ''}
+        if is_yes_no:
+            has_answers = raw_df[q1_col[0]].astype(str).str.strip().str.lower() == 'yes'
+            raw_df = raw_df[has_answers].reset_index(drop=True)
+            logger.info(f"After filtering screened respondents: {len(raw_df)} respondents")
+        else:
+            logger.info(f"Non-branching pulse detected - keeping all {len(raw_df)} respondents")
     # Load audience definitions from JSON file if not provided
     if audience_defs is None:
         segments_file_path = os.path.join(os.path.dirname(__file__), "audience_segments.json")
@@ -246,68 +256,6 @@ def process_single_select_question(df, question_id, categories):
     
     return values
 
-def generate_ppt_with_charts():
-    """Generate PowerPoint presentation with charts from the latest exports."""
-    logger.info("\nStarting PowerPoint generation...")
-    
-    # Reset theme colors at the start of chart generation
-    config.reset_theme_colors()
-    logger.info("Theme colors reset")
-    
-    # Create presentation
-    prs = Presentation(config.TEMPLATE_PATH) if os.path.exists(config.TEMPLATE_PATH) else Presentation()
-    logger.info(f"Created presentation from {'template' if os.path.exists(config.TEMPLATE_PATH) else 'scratch'}")
-    
-    # Clear existing slides
-    while prs.slides:
-        rid = prs.slides._sldIdLst[0].rId
-        prs.part.drop_rel(rid)
-        del prs.slides._sldIdLst[0]
-    logger.info("Cleared existing slides")
-    
-    # Process summary data
-    logger.info("\nProcessing summary data...")
-    summary_data, summary_counts = process_summary_data()
-    logger.info(f"Found {len(summary_data)} summary charts")
-    
-    # Process raw audience data
-    logger.info("\nProcessing raw audience data...")
-    raw_audience_data, combined_data = process_audience_data(summary_data, summary_counts)
-    logger.info(f"Found {len(raw_audience_data)} raw audience charts")
-    logger.info(f"Found {len(combined_data)} combined charts")
-    
-    # Add summary slides
-    logger.info("\nAdding summary slides...")
-    for title, (cats, totals) in summary_data.items():
-        logger.info(f"Adding summary slide for: {title}")
-        slide, chart = create_chart_slide(prs, cats, [('Total', totals)])
-        chart.chart_title.text_frame.text = title
-        p = chart.chart_title.text_frame.paragraphs[0]
-        p.font.name = 'Calibri'
-        p.font.size = Pt(12)
-        p.font.italic = True
-        
-        # Add footer
-        y = prs.slide_height - Inches(config.FOOTER_OFFSET)
-        tx = slide.shapes.add_textbox(Inches(0.5), y, Inches(6), Inches(0.3))
-        pf = tx.text_frame.paragraphs[0]
-        pf.text = f"Source: OnePulse, Total ({summary_counts[title]})"
-        pf.font.name = 'Calibri'
-        pf.font.size = Pt(10)
-        pf.font.color.rgb = RGBColor(0,0,0)
-    
-    # Add raw audience slides
-    logger.info("\nAdding raw audience slides...")
-    prs = add_raw_audience_slides(prs, raw_audience_data)
-    
-    # Add combined slides
-    logger.info("\nAdding combined slides...")
-    prs = add_combined_slides(prs, combined_data)
-    
-    # Save the presentation
-    logger.info(f"\nSaving presentation to {config.DEFAULT_OUTPUT_PPTX}...")
-    prs.save(config.DEFAULT_OUTPUT_PPTX)
-    logger.info("PowerPoint generation complete!\n")
 
 def main():
     # Load data from environment variable
@@ -316,18 +264,13 @@ def main():
         logger.error("No data file specified. Please upload a file through the Streamlit interface.")
         sys.exit(1)
 
-    # Load the data file
-    if data_file.endswith('.csv'):
-        raw_df = pd.read_csv(data_file, skiprows=3)
-    elif data_file.endswith('.json'):
-        raw_df = pd.read_json(data_file)
-    else:
-        raw_df = pd.read_excel(data_file, sheet_name=0, skiprows=3)
+    # Load and process the data file
+    raw_df = load_file(data_file)
 
     logger.info(f"Raw data shape: {raw_df.shape if raw_df is not None else 'None'}")
 
     # Process the data
-    raw_audience_data, combined_data = process_data(raw_df)
+    raw_audience_data, combined_data, group_audience_names = process_data(raw_df)
 
     # Now call the PPT generator
     try:
@@ -337,7 +280,9 @@ def main():
         
         # Generate the presentation
         generate_presentation(
-            raw_audience_data, combined_data
+            raw_audience_data,
+            combined_data,
+            group_audience_names=group_audience_names
         )
         
         # Verify the file was created

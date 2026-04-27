@@ -234,7 +234,19 @@ def process_dataframe(df: pd.DataFrame) -> pd.DataFrame:
           .str.strip()
           .str.replace(r"\s+", " ", regex=True)
     )
-    
+        # Keep only respondents who reached the first real question after the screener
+    first_main_question_col = next(
+        (
+            col for col in df.columns
+            if re.match(r'^Q\(\d+\)', col)
+            and '_' not in col
+            and 'Comments' not in col
+        ),
+        None
+    )
+
+    if first_main_question_col:
+        df = df[df[first_main_question_col].notna()].reset_index(drop=True)
     # Process bank columns
     df = process_semicolon_separated_column(df, 'Bank(s)', '_customer')
     
@@ -247,8 +259,7 @@ def process_dataframe(df: pd.DataFrame) -> pd.DataFrame:
             # Extract the expected value from the column name (the part before [Question:)
             expected_value = col.split('[', 1)[0].split(')', 1)[1].strip()
             # Convert to boolean: TRUE if the cell contains the expected value, FALSE otherwise
-            df[col] = df[col].fillna('').astype(str).str.contains(expected_value, regex=False)
-    
+            df[col] = df[col].fillna('').astype(str).str.contains(expected_value, regex=False).astype(bool)
     return df
 
 def load_file(file_path: str) -> pd.DataFrame:

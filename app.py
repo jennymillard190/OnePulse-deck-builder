@@ -241,7 +241,7 @@ if st.session_state.get('df') is not None and st.session_state.analysis_mode == 
             st.rerun()
 
 # --- Export type selection and Generate (only when audiences exist) ---
-if st.session_state.audiences and st.session_state.analysis_mode == "OnePulse Powerpoint Charting":
+if st.session_state.get('df') is not None and st.session_state.analysis_mode == "OnePulse Powerpoint Charting":
     # --- Export type selection ---
     export_type = st.radio(
         "Select PowerPoint Export Type:",
