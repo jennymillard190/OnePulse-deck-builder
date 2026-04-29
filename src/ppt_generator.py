@@ -26,10 +26,15 @@ def apply_chart_title(chart, title: str) -> None:
     clean_title = clean_chart_title(title)
     chart.chart_title.text_frame.text = clean_title
     p = chart.chart_title.text_frame.paragraphs[0]
-    p.font.name = 'Calibri'
+    p.font.name = 'Bally Thrill'
     p.font.size = Pt(12)
     p.font.italic = True
     p.font.color.rgb = RGBColor(0,0,0)
+    for run in p.runs:
+        run.font.name = 'Bally Thrill'
+        run.font.size = Pt(12)
+        run.font.italic = True
+        run.font.color.rgb = RGBColor(0, 0, 0)
 
 def add_source_footer(slide, prs, text: str) -> None:
     """
@@ -42,6 +47,35 @@ def add_source_footer(slide, prs, text: str) -> None:
     pf.font.name = 'Calibri'
     pf.font.size = Pt(10)
     pf.font.color.rgb = RGBColor(0,0,0)
+
+def set_text_style(shape, font_name: str = "Bally Thrill", font_size: int = None, bold: bool = None, italic: bool = None):
+    """Apply consistent font styling to all text in a shape."""
+    if not shape.has_text_frame:
+        return
+
+    for paragraph in shape.text_frame.paragraphs:
+        paragraph.font.name = font_name
+
+        if font_size is not None:
+            paragraph.font.size = Pt(font_size)
+        if bold is not None:
+            paragraph.font.bold = bold
+        if italic is not None:
+            paragraph.font.italic = italic
+
+        paragraph.font.color.rgb = RGBColor(0, 0, 0)
+
+        for run in paragraph.runs:
+            run.font.name = font_name
+
+            if font_size is not None:
+                run.font.size = Pt(font_size)
+            if bold is not None:
+                run.font.bold = bold
+            if italic is not None:
+                run.font.italic = italic
+
+            run.font.color.rgb = RGBColor(0, 0, 0)
 
 def get_layout(prs: Presentation, name: str = "8_UPFRONT 3"):
     """Get a slide layout by name, falling back to a default if not found."""
@@ -179,7 +213,7 @@ def create_chart_slide(
         dl = ser.data_labels
         dl.show_value = True
         dl.number_format = '0%'
-        dl.font.name = 'Calibri'
+        dl.font.name = 'Bally Thrill'
         dl.font.size = data_label_size
 
     # Remove gridlines & format axes
@@ -189,7 +223,7 @@ def create_chart_slide(
     
     # Format category axis labels
     tl = chart.category_axis.tick_labels
-    tl.font.name = 'Calibri'
+    tl.font.name = 'Bally Thrill'
     tl.font.size = Pt(12)
     tl.font.color.rgb = RGBColor(0,0,0)
     tl.number_format = '@'  # Use text format
@@ -203,7 +237,7 @@ def create_chart_slide(
         lg = chart.legend
         lg.position = XL_LEGEND_POSITION.TOP
         lg.include_in_layout = False
-        lg.font.name = 'Calibri'
+        lg.font.name = 'Bally Thrill'
         lg.font.size = Pt(12)
     else:
         chart.has_legend = False
@@ -596,66 +630,172 @@ def generate_presentation(
 ) -> None:
     """
     Generate the complete PowerPoint presentation using raw audience and combined data.
-    Args:
-        raw_audience_data: Processed raw audience data (includes categories and values)
-        combined_data: Processed combined chart data (includes categories and values)
-        output_path: Optional path for the output PowerPoint file. If not provided,
-                    uses the default path from config.
-        group_audience_names: Set of audience names that are part of a group (to avoid individual slides)
-        export_type: Type of export - "full" (all slides) or "condensed" (groups + ungrouped only)
-        audience_defs: The audience definitions dict (for group/ungrouped logic)
     """
-    # Initialize presentation from template
     prs = Presentation(config.TEMPLATE_PATH)
-    
-    # Keep only the first two slides (cover and methodology)
-    while len(prs.slides) > 2:
-        rid = prs.slides._sldIdLst[-1].rId
-        prs.part.drop_rel(rid)
-        del prs.slides._sldIdLst[-1]
 
-    # Add methodology content to the methodology slide (text box with ID 12)
-    methodology_slide = prs.slides[1]  # Second slide
-    for shape in methodology_slide.shapes:
-        if shape.has_text_frame and shape.shape_id == 12:
-            # Create the text frame with proper bullet points
-            text_frame = shape.text_frame
-            text_frame.clear()  # Clear existing text
-            # Add questions and responses
-            for title, categories, _ in raw_audience_data:
-                # Add question
-                p = text_frame.add_paragraph()
-                p.text = title
-                p.level = 0
-                p.font.size = Pt(8)  # Set question text to 8pt
-                # Add response options as a single line
-                p = text_frame.add_paragraph()
-                p.text = f"Response options: {', '.join(f'\"{cat}\"' for cat in categories)}"
-                p.level = 1
-                p.font.size = Pt(7)  # Set response text to 7pt
+    # Remove any slides already inside the template file
+    while len(prs.slides) > 0:
+        r_id = prs.slides._sldIdLst[0].rId
+        prs.part.drop_rel(r_id)
+        del prs.slides._sldIdLst[0]
+
+    # Slide 1: title slide from template
+    title_layout = prs.slide_layouts[0]
+    s1 = prs.slides.add_slide(title_layout)
+
+        # Replace title slide placeholder text
+    text_shapes = [shape for shape in s1.shapes if shape.has_text_frame]
+    text_shapes = sorted(text_shapes, key=lambda shape: shape.top)
+
+    if len(text_shapes) >= 1:
+        text_shapes[0].text_frame.text = "OnePulse Survey"
+        set_text_style(text_shapes[0], font_size=40)
+
+    if len(text_shapes) >= 2:
+        text_shapes[1].text_frame.text = "Customer Research Team"
+        set_text_style(text_shapes[1], font_size=24)
+
+    # Slide 2: questions and audience summary
+    blank_layout = prs.slide_layouts[6] if len(prs.slide_layouts) > 6 else prs.slide_layouts[0]
+    s2 = prs.slides.add_slide(blank_layout)
+    clear_text(s2)
+
+    title_box = s2.shapes.add_textbox(Inches(0.75), Inches(0.45), Inches(11.5), Inches(0.5))
+    p = title_box.text_frame.paragraphs[0]
+    p.text = "Questions and audience"
+    p.font.name = "Bally Thrill"
+    p.font.size = Pt(28)
+    p.font.color.rgb = RGBColor(0, 0, 0)
+
+    body_box = s2.shapes.add_textbox(Inches(0.75), Inches(1.2), Inches(11.5), Inches(5.8))
+    tf = body_box.text_frame
+    tf.clear()
+    tf.word_wrap = True
+
+    first_para = True
+
+    def is_screener_question(question_text: str) -> bool:
+        q = str(question_text).lower()
+        screener_keywords = [
+            "how often",
+            "do you place",
+            "have you",
+            "which of the following",
+            "screened in",
+            "screener"
+        ]
+        return any(keyword in q for keyword in screener_keywords)
+
+    # Audience summary
+    audience_labels = []
+    if raw_audience_data:
+        first_question_segments = raw_audience_data[0][2]
+        for label, vals, n_resp in first_question_segments:
+            audience_labels.append(f"{label} ({n_resp})")
+
+    if audience_labels:
+        para = tf.paragraphs[0]
+        para.text = "Audience: " + ", ".join(audience_labels)
+        para.font.name = "Bally Thrill"
+        para.font.size = Pt(12)
+        para.font.bold = True
+        para.font.color.rgb = RGBColor(0, 0, 0)
+        para.space_after = Pt(12)
+        first_para = False
+
+    main_questions = []
+    screener_questions = []
+
+    for q_title, categories, _ in raw_audience_data:
+        if is_screener_question(q_title):
+            screener_questions.append((q_title, categories))
+        else:
+            main_questions.append((q_title, categories))
+
+    # Numbered main questions
+    for i, (q_title, categories) in enumerate(main_questions, start=1):
+        if first_para:
+            para = tf.paragraphs[0]
+            first_para = False
+        else:
+            para = tf.add_paragraph()
+
+        para.text = f"{i}. {clean_chart_title(q_title)}"
+        para.level = 0
+        para.font.name = "Bally Thrill"
+        para.font.size = Pt(12)
+        para.font.bold = True
+        para.font.color.rgb = RGBColor(0, 0, 0)
+        para.space_before = Pt(8)
+        para.space_after = Pt(2)
+
+        para = tf.add_paragraph()
+        para.text = "Response options: " + ", ".join(categories)
+        para.level = 1
+        para.font.name = "Bally Thrill"
+        para.font.size = Pt(12)
+        para.font.bold = False
+        para.font.color.rgb = RGBColor(0, 0, 0)
+        para.space_after = Pt(10)
+
+    # Screener section
+    if screener_questions:
+        para = tf.add_paragraph()
+        para.text = "SCREENER:"
+        para.level = 0
+        para.font.name = "Bally Thrill"
+        para.font.size = Pt(12)
+        para.font.bold = True
+        para.font.color.rgb = RGBColor(0, 0, 0)
+        para.space_before = Pt(18)
+        para.space_after = Pt(2)
+
+        for q_title, categories in screener_questions:
+            para = tf.add_paragraph()
+            para.text = clean_chart_title(q_title)
+            para.level = 0
+            para.font.name = "Bally Thrill"
+            para.font.size = Pt(12)
+            para.font.bold = True
+            para.font.color.rgb = RGBColor(0, 0, 0)
+            para.space_after = Pt(2)
+
+            para = tf.add_paragraph()
+            para.text = "Screened in: " + ", ".join(categories)
+            para.level = 0
+            para.font.name = "Bally Thrill"
+            para.font.size = Pt(12)
+            para.font.bold = True
+            para.font.color.rgb = RGBColor(0, 0, 0)
+            para.space_after = Pt(8)
 
     # Validate export_type parameter
     if export_type not in ["full", "condensed"]:
         raise ValueError(f"Invalid export_type: {export_type}. Must be 'full' or 'condensed'")
-    
+
     # Use appropriate function based on export type
     if export_type == "full":
-        # Add raw audience slides (individual audience slides)
         prs = add_raw_audience_slides(prs, raw_audience_data)
-        # Add combined slides (all segments together + individual vs total)
-        prs = add_combined_slides_full_export(prs, combined_data, group_audience_names=group_audience_names)
-    else:  # condensed
-        # Skip raw audience slides - only add combined slides with groups + ungrouped
-        prs = add_combined_slides_condensed_export(prs, combined_data, group_audience_names=group_audience_names, audience_defs=audience_defs, raw_audience_data=raw_audience_data)
+        prs = add_combined_slides_full_export(
+            prs,
+            combined_data,
+            group_audience_names=group_audience_names
+        )
+    else:
+        prs = add_combined_slides_condensed_export(
+            prs,
+            combined_data,
+            group_audience_names=group_audience_names,
+            audience_defs=audience_defs,
+            raw_audience_data=raw_audience_data
+        )
 
     # Save presentation with appropriate filename
     if output_path:
-        # If output_path is provided, use it as-is
         output_file = output_path
     else:
-        # Generate filename based on export type
         base_name = config.DEFAULT_OUTPUT_PPTX.replace('.pptx', '')
         output_file = f"{base_name}_{export_type}.pptx"
-    
+
     prs.save(output_file)
-    print(f"Presentation saved to: {output_file}") 
+    print(f"Presentation saved to: {output_file}")

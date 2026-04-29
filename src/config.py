@@ -32,7 +32,7 @@ BASE_DIR: str = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 # Directory and file paths
 EXPORTS_DIR: str = os.path.join(BASE_DIR, 'exports')
-TEMPLATE_PATH: str = os.path.join(os.path.dirname(__file__), 'templates', 'template.pptx')
+TEMPLATE_PATH: str = os.path.join(os.path.dirname(__file__), 'templates', 'template clean.pptx')
 
 def get_output_pptx_path(input_filename: str, export_type: str = "full") -> str:
     """
