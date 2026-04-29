@@ -603,15 +603,46 @@ def add_cover_and_methodology_slides(
     
     # Get the source slides
     source_slides = list(cover_prs.slides)
-    
-    # Create new slides at the beginning
-    for source_slide in reversed(source_slides):  # Reverse to maintain order
+
+    # Identify the cover template's title + summary slides (so we don't copy everything blindly).
+    title_slide_idx = None
+    summary_slide_idx = None
+    for idx, s in enumerate(source_slides):
+        if _slide_contains_text(s, "Presentation") or _slide_contains_text(s, "Presentation Subtitle"):
+            title_slide_idx = idx
+            break
+
+    if title_slide_idx is not None:
+        for idx in range(title_slide_idx + 1, len(source_slides)):
+            if _slide_contains_text(source_slides[idx], "Text Box Templates") or _slide_contains_text(source_slides[idx], "Text Box Templates Subtitle"):
+                summary_slide_idx = idx
+                break
+
+    restrict_to_title_and_summary = (
+        title_slide_idx is not None and summary_slide_idx is not None
+    )
+    allowed_indices = {title_slide_idx, summary_slide_idx} if restrict_to_title_and_summary else None
+
+    # Create new slides at the beginning (reversed to keep the inserted order stable).
+    for idx, source_slide in reversed(list(enumerate(source_slides))):
+        # Always skip default/template slides we don't want.
+        if _slide_contains_text(source_slide, "New PowerPoint Template"):
+            continue
+        if _slide_contains_text(source_slide, "Guidelines"):
+            continue
+
+        if allowed_indices is not None and idx not in allowed_indices:
+            continue
+
+        is_title_slide = idx == title_slide_idx
+        is_summary_slide = idx == summary_slide_idx
+
         # Get the layout from the source slide
         layout = source_slide.slide_layout
-        
+
         # Create new slide with the same layout
         new_slide = prs.slides.add_slide(layout)
-        
+
         # Copy shapes from source to new slide
         for shape in source_slide.shapes:
             # Get the shape's position and size
@@ -619,19 +650,46 @@ def add_cover_and_methodology_slides(
             top = shape.top
             width = shape.width
             height = shape.height
-            
+
             # Copy the shape based on its type
             if shape.has_text_frame:
-                # Create a new text box
+                original_text = shape.text_frame.text or ""
+                text_trim = original_text.strip()
+
+                # Title slide: only copy/replace the specific placeholders.
+                # This also ensures survey questions aren't copied onto the title slide.
+                if is_title_slide:
+                    # Replace title placeholders
+                    if "Presentation Subtitle" in text_trim:
+                        new_text = "Customer Research"
+                    elif text_trim == "Presentation":
+                        new_text = "OnePulse Survey"
+                    elif "Name Surname" in text_trim:
+                        new_text = ""  # remove/blank
+                    else:
+                        continue  # don't copy other text (e.g., survey questions)
+
+                    new_shape = new_slide.shapes.add_textbox(left, top, width, height)
+                    new_shape.text_frame.text = new_text
+                    continue
+
+                # Summary slide: replace the specific summary header placeholders.
+                if is_summary_slide:
+                    if text_trim == "Text Box Templates":
+                        original_text = "Summary of approach"
+                    elif text_trim == "Text Box Templates Subtitle":
+                        original_text = "Target audience & questions"
+
+                # Default text-copy behavior
                 new_shape = new_slide.shapes.add_textbox(left, top, width, height)
-                # Copy the text
-                new_shape.text_frame.text = shape.text_frame.text
+                new_shape.text_frame.text = original_text
+
             elif shape.has_chart:
                 # Skip charts for now
                 continue
             else:
                 # For other shapes, just copy the basic properties
-                new_shape = new_slide.shapes.add_shape(
+                new_slide.shapes.add_shape(
                     shape.shape_type,
                     left, top, width, height
                 )
