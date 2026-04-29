@@ -607,38 +607,7 @@ def generate_presentation(
     """
     # Initialize presentation from template
     prs = Presentation(config.TEMPLATE_PATH)
-    # --- SAFE TITLE + SUMMARY EDITS ---
-
-# Title slide (slide 0)
-if len(prs.slides) > 0:
-    title_slide = prs.slides[0]
-    for shape in title_slide.shapes:
-        if not shape.has_text_frame:
-            continue
-        text = shape.text.strip()
-
-        if "Presentation Subtitle" in text:
-            shape.text = "Customer Research"
-        elif "Presentation" in text:
-            shape.text = "OnePulse Survey"
-        elif "Name Surname" in text:
-            shape.text = ""
-        else:
-            # Clear any other text (removes questions from title slide)
-            shape.text = ""
-
-# Summary slide (slide 1)
-if len(prs.slides) > 1:
-    summary_slide = prs.slides[1]
-    for shape in summary_slide.shapes:
-        if not shape.has_text_frame:
-            continue
-        text = shape.text.strip()
-
-        if "Text Box Templates Subtitle" in text:
-            shape.text = "Target audience & questions"
-        elif "Text Box Templates" in text:
-            shape.text = "Summary of approach"
+    
     # Keep only the first two slides (cover and methodology)
     while len(prs.slides) > 2:
         rid = prs.slides._sldIdLst[-1].rId
