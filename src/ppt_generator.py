@@ -5,7 +5,6 @@ from pptx.util import Inches, Pt
 from pptx.chart.data import ChartData, CategoryChartData
 from pptx.enum.chart import XL_CHART_TYPE, XL_LEGEND_POSITION
 from pptx.enum.dml import MSO_THEME_COLOR
-from pptx.enum.shapes import PP_PLACEHOLDER
 from pptx.dml.color import RGBColor
 from . import config
 import logging
@@ -63,57 +62,6 @@ def clear_text(slide):
     for shape in shapes_to_remove:
         sp = shape._element
         sp.getparent().remove(sp)
-
-def _slide_contains_text(slide, phrase: str) -> bool:
-    """Return True if any text frame on the slide contains `phrase`."""
-    if not phrase:
-        return False
-    for shape in slide.shapes:
-        if shape.has_text_frame:
-            try:
-                if phrase in shape.text_frame.text:
-                    return True
-            except Exception:
-                # If a shape can't be read for some reason, ignore it.
-                continue
-    return False
-
-def _delete_slide_at(prs: Presentation, slide_idx: int) -> None:
-    """Delete a slide from the presentation by index."""
-    sldIdLst = prs.slides._sldIdLst
-    rid = sldIdLst[slide_idx].rId
-    prs.part.drop_rel(rid)
-    del sldIdLst[slide_idx]
-
-def _remove_guidelines_slide(prs: Presentation, phrase: str = "New PowerPoint Template | Guidelines") -> None:
-    """Remove the default template guidelines slide if it exists."""
-    i = len(prs.slides) - 1
-    while i >= 0:
-        slide = prs.slides[i]
-        if _slide_contains_text(slide, phrase):
-            _delete_slide_at(prs, i)
-            # After deletion, the next slide shifts into the same index.
-            # So we don't decrement `i` here.
-            continue
-        i -= 1
-
-def _set_placeholder_text(slide, placeholder_type, text: str) -> bool:
-    """
-    Set text for a placeholder on a slide (e.g., TITLE, SUBTITLE).
-    Returns True if a matching placeholder was found and updated.
-    """
-    for shape in slide.shapes:
-        if not getattr(shape, "is_placeholder", False):
-            continue
-        try:
-            if shape.placeholder_format.type == placeholder_type and shape.has_text_frame:
-                tf = shape.text_frame
-                tf.clear()
-                tf.text = text
-                return True
-        except Exception:
-            continue
-    return False
 
 def create_chart_slide(
     prs: Presentation,
@@ -659,9 +607,6 @@ def generate_presentation(
     """
     # Initialize presentation from template
     prs = Presentation(config.TEMPLATE_PATH)
-
-    # Remove the default PowerPoint template guidelines slide, if present.
-    _remove_guidelines_slide(prs)
     
     # Keep only the first two slides (cover and methodology)
     while len(prs.slides) > 2:
@@ -669,58 +614,25 @@ def generate_presentation(
         prs.part.drop_rel(rid)
         del prs.slides._sldIdLst[-1]
 
-    if len(prs.slides) < 2:
-        raise ValueError("PowerPoint template must contain at least a title slide and a summary/methodology slide.")
-
-    # Slide 0: Opening title slide (existing title slide layout)
-    title_slide = prs.slides[0]
-    _set_placeholder_text(title_slide, PP_PLACEHOLDER.TITLE, "OnePulse Survey")
-    _set_placeholder_text(title_slide, PP_PLACEHOLDER.SUBTITLE, "Customer Research")
-
-    # Slide 1: Summary slide (text box layout)
-    summary_slide = prs.slides[1]  # Immediately after title slide
-    _set_placeholder_text(summary_slide, PP_PLACEHOLDER.TITLE, "Summary of approach")
-    _set_placeholder_text(summary_slide, PP_PLACEHOLDER.SUBTITLE, "Target audience & questions")
-
-    # Add questions/options to the summary slide body area.
-    body_shape = None
-    for shape in summary_slide.shapes:
+    # Add methodology content to the methodology slide (text box with ID 12)
+    methodology_slide = prs.slides[1]  # Second slide
+    for shape in methodology_slide.shapes:
         if shape.has_text_frame and shape.shape_id == 12:
-            body_shape = shape
-            break
-
-    # Fallback: use BODY placeholder if the shape_id differs between templates.
-    if body_shape is None:
-        body_placeholder_type = getattr(PP_PLACEHOLDER, "BODY", None)
-        if body_placeholder_type is None:
-            body_placeholder_type = None
-        for shape in summary_slide.shapes:
-            if (
-                body_placeholder_type is not None
-                and shape.is_placeholder
-                and shape.placeholder_format.type == body_placeholder_type
-                and shape.has_text_frame
-            ):
-                body_shape = shape
-                break
-
-    if body_shape is not None and body_shape.has_text_frame:
-        text_frame = body_shape.text_frame
-        text_frame.clear()  # Clear existing text
-        for title, categories, _ in raw_audience_data:
-            # Add question
-            p = text_frame.add_paragraph()
-            p.text = title
-            p.level = 0
-            p.font.size = Pt(8)  # Set question text to 8pt
-
-            # Add response options as a single line
-            p = text_frame.add_paragraph()
-            p.text = f"Response options: {', '.join(f'\"{cat}\"' for cat in categories)}"
-            p.level = 1
-            p.font.size = Pt(7)  # Set response text to 7pt
-    else:
-        logger.warning("Could not find a summary slide body text box to insert survey questions.")
+            # Create the text frame with proper bullet points
+            text_frame = shape.text_frame
+            text_frame.clear()  # Clear existing text
+            # Add questions and responses
+            for title, categories, _ in raw_audience_data:
+                # Add question
+                p = text_frame.add_paragraph()
+                p.text = title
+                p.level = 0
+                p.font.size = Pt(8)  # Set question text to 8pt
+                # Add response options as a single line
+                p = text_frame.add_paragraph()
+                p.text = f"Response options: {', '.join(f'\"{cat}\"' for cat in categories)}"
+                p.level = 1
+                p.font.size = Pt(7)  # Set response text to 7pt
 
     # Validate export_type parameter
     if export_type not in ["full", "condensed"]:
