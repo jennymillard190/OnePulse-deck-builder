@@ -83,6 +83,76 @@ class TestScaleHelpers(unittest.TestCase):
             },
         )
 
+    def test_generic_appealing_scale_is_recognised(self):
+        categories = [
+            "Quite unappealing",
+            "Very appealing",
+            "Neither appealing nor unappealing",
+            "Very unappealing",
+            "Quite appealing",
+            "Don't know",
+        ]
+        values = [0.15, 0.30, 0.10, 0.05, 0.35, 0.05]
+
+        self.assertTrue(is_scale_question(categories))
+        self.assertEqual(
+            calculate_net_group_percentages(categories, values),
+            {
+                "positive_label": "Net appealing",
+                "negative_label": "Net unappealing",
+                "positive_pct": 65,
+                "negative_pct": 20,
+            },
+        )
+
+        ordered = order_scale_categories_and_values(categories, values)
+        self.assertIsNotNone(ordered)
+        ordered_categories, ordered_values = ordered
+        self.assertEqual(
+            ordered_categories,
+            [
+                "Very appealing",
+                "Quite appealing",
+                "Neither appealing nor unappealing",
+                "Quite unappealing",
+                "Very unappealing",
+                "Don't know",
+            ],
+        )
+        self.assertEqual(ordered_values, [0.30, 0.35, 0.10, 0.15, 0.05, 0.05])
+
+    def test_generic_clear_scale_is_recognised(self):
+        categories = [
+            "Very clear",
+            "Quite clear",
+            "Neither clear nor unclear",
+            "Quite unclear",
+            "Very unclear",
+        ]
+        values = [0.20, 0.40, 0.10, 0.20, 0.10]
+
+        self.assertEqual(
+            calculate_net_group_percentages(categories, values),
+            {
+                "positive_label": "Net clear",
+                "negative_label": "Net unclear",
+                "positive_pct": 60,
+                "negative_pct": 30,
+            },
+        )
+
+    def test_generic_scale_requires_all_five_roles(self):
+        categories = [
+            "Very appealing",
+            "Quite appealing",
+            "Neither appealing nor unappealing",
+            "Very unappealing",
+        ]
+        values = [0.30, 0.35, 0.10, 0.25]
+
+        self.assertFalse(is_scale_question(categories))
+        self.assertIsNone(calculate_net_group_percentages(categories, values))
+
 
 if __name__ == "__main__":
     unittest.main()
