@@ -5,8 +5,11 @@ from pptx.util import Inches, Pt
 from pptx.chart.data import ChartData, CategoryChartData
 from pptx.enum.chart import XL_CHART_TYPE, XL_LEGEND_POSITION
 from pptx.enum.dml import MSO_THEME_COLOR
+from pptx.enum.shapes import MSO_SHAPE
+from pptx.enum.text import PP_ALIGN
 from pptx.dml.color import RGBColor
 from . import config
+from .scale_helpers import calculate_net_group_percentages, format_net_group_line
 import logging
 import re
 
@@ -47,6 +50,85 @@ def add_source_footer(slide, prs, text: str) -> None:
     pf.font.name = 'Calibri'
     pf.font.size = Pt(10)
     pf.font.color.rgb = RGBColor(0,0,0)
+
+def add_net_score_callouts(
+    slide,
+    prs: Presentation,
+    categories: List[str],
+    series_list: List[Tuple[str, List[float]]]
+) -> None:
+    """Add compact grouped percentage callouts for recognised scale questions."""
+    callouts = []
+    for label, values in series_list:
+        net_groups = calculate_net_group_percentages(categories, values)
+        if net_groups is None:
+            return
+        callouts.append((label, net_groups))
+
+    if not callouts:
+        return
+
+    box_count = len(callouts)
+    box_left = prs.slide_width - Inches(2.0)
+    box_top = Inches(1.25)
+    box_width = Inches(1.6)
+    max_total_height = Inches(4.55)
+    box_gap = Inches(0.06)
+    box_height = min(
+        Inches(0.72),
+        (max_total_height - (box_count - 1) * box_gap) / box_count
+    )
+    font_size = Pt(7 if box_height >= Inches(0.53) else 6)
+
+    for idx, (label, net_groups) in enumerate(callouts):
+        top = box_top + idx * (box_height + box_gap)
+        box = slide.shapes.add_shape(
+            MSO_SHAPE.ROUNDED_RECTANGLE,
+            box_left,
+            top,
+            box_width,
+            box_height
+        )
+        box.fill.solid()
+        box.fill.fore_color.rgb = RGBColor(245, 245, 245)
+        box.line.color.rgb = RGBColor(0, 0, 0)
+        box.line.width = Pt(0.75)
+
+        tf = box.text_frame
+        tf.clear()
+        tf.word_wrap = True
+        tf.margin_left = Inches(0.05)
+        tf.margin_right = Inches(0.05)
+        tf.margin_top = Inches(0.02)
+        tf.margin_bottom = Inches(0.02)
+
+        label_para = tf.paragraphs[0]
+        label_para.text = str(label)
+        label_para.alignment = PP_ALIGN.CENTER
+        label_para.font.name = "Bally Thrill"
+        label_para.font.size = font_size
+        label_para.font.bold = True
+        label_para.font.color.rgb = RGBColor(0, 0, 0)
+
+        positive_para = tf.add_paragraph()
+        positive_para.text = format_net_group_line(
+            str(net_groups["positive_label"]),
+            int(net_groups["positive_pct"])
+        )
+        positive_para.alignment = PP_ALIGN.CENTER
+        positive_para.font.name = "Bally Thrill"
+        positive_para.font.size = font_size
+        positive_para.font.color.rgb = RGBColor(0, 0, 0)
+
+        negative_para = tf.add_paragraph()
+        negative_para.text = format_net_group_line(
+            str(net_groups["negative_label"]),
+            int(net_groups["negative_pct"])
+        )
+        negative_para.alignment = PP_ALIGN.CENTER
+        negative_para.font.name = "Bally Thrill"
+        negative_para.font.size = font_size
+        negative_para.font.color.rgb = RGBColor(0, 0, 0)
 
 def set_text_style(shape, font_name: str = "Bally Thrill", font_size: int = None, bold: bool = None, italic: bool = None):
     """Apply consistent font styling to all text in a shape."""
@@ -241,6 +323,8 @@ def create_chart_slide(
         lg.font.size = Pt(12)
     else:
         chart.has_legend = False
+
+    add_net_score_callouts(slide, prs, cats, series_list)
 
     return slide, chart
 

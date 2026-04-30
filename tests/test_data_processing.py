@@ -847,6 +847,49 @@ class TestPowerPointGeneration(unittest.TestCase):
         self.assertEqual(len(colors), len(series_list), 
                         "Each series should have a unique color")
 
+    def test_scale_chart_adds_net_group_callouts(self):
+        """Scale charts should show grouped percentage callouts per series."""
+        categories = [
+            'Strongly agree',
+            'Agree',
+            'Neither agree nor disagree',
+            'Disagree',
+            'Strongly disagree'
+        ]
+        series_list = [
+            ('Total', [0.35, 0.25, 0.10, 0.15, 0.05]),
+            ('Group 1', [0.20, 0.30, 0.20, 0.20, 0.10])
+        ]
+
+        slide, chart = create_chart_slide(self.prs, categories, series_list)
+
+        shape_text = "\n".join(
+            shape.text
+            for shape in slide.shapes
+            if getattr(shape, "has_text_frame", False)
+        )
+        self.assertIn("Total", shape_text)
+        self.assertIn("Group 1", shape_text)
+        self.assertIn("Net agree: 60%", shape_text)
+        self.assertIn("Net disagree: 20%", shape_text)
+        self.assertIn("Net agree: 50%", shape_text)
+        self.assertIn("Net disagree: 30%", shape_text)
+        self.assertNotIn("Net score:", shape_text)
+
+    def test_non_scale_chart_does_not_add_net_score_callouts(self):
+        """Normal categorical charts should not get net score callouts."""
+        categories = ['Lloyds', 'Barclays', 'Halifax']
+        series_list = [('Total', [0.3, 0.5, 0.2])]
+
+        slide, chart = create_chart_slide(self.prs, categories, series_list)
+
+        shape_text = "\n".join(
+            shape.text
+            for shape in slide.shapes
+            if getattr(shape, "has_text_frame", False)
+        )
+        self.assertNotIn("Net score:", shape_text)
+
     def test_missing_template_file_raises_clear_error(self):
         """Test that missing template file raises a clear, user-friendly error."""
         # Save the original template path

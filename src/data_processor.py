@@ -2,6 +2,7 @@ import re
 from typing import List, Tuple, Dict, Optional
 import pandas as pd
 from . import config
+from .scale_helpers import order_scale_categories_and_values
 import logging
 
 logger = logging.getLogger(__name__)
@@ -256,10 +257,14 @@ def process_raw_audience_data(raw_df):
                 values = process_multi_select_question(raw_df, q_id, categories)
             
             if values:
-                sorted_pairs = sorted(zip(categories, values), key=lambda x: x[1], reverse=True)
-                categories, values = zip(*sorted_pairs)
-                categories = list(categories)
-                values = list(values)
+                scale_ordered = order_scale_categories_and_values(categories, values)
+                if scale_ordered is not None:
+                    categories, values = scale_ordered
+                else:
+                    sorted_pairs = sorted(zip(categories, values), key=lambda x: x[1], reverse=True)
+                    categories, values = zip(*sorted_pairs)
+                    categories = list(categories)
+                    values = list(values)
                 results.append((q_id, question_text, categories, values))
     
     return results
