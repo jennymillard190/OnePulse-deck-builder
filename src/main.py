@@ -282,7 +282,8 @@ def main():
         generate_presentation(
             raw_audience_data,
             combined_data,
-            group_audience_names=group_audience_names
+            group_audience_names=group_audience_names,
+            raw_df=raw_df
         )
         
         # Verify the file was created

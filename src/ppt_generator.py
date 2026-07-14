@@ -704,13 +704,260 @@ def add_cover_and_methodology_slides(
     
     return prs
 
+def _question_number_from_text(text: str) -> Optional[int]:
+    match = re.match(r'^\s*Q\((\d+)\)', str(text))
+    return int(match.group(1)) if match else None
+
+
+def _normalise_question_text(text: str) -> str:
+    return clean_chart_title(str(text)).strip().lower()
+
+
+def _extract_question_summary(raw_df, raw_audience_data):
+    """Build the questionnaire summary directly from the OnePulse export.
+
+    This keeps the original question numbering, includes open-ended questions,
+    and identifies appended screener questions from export structure rather
+    than broad wording such as "which of the following".
+    """
+    if raw_df is None:
+        return None
+
+    question_ids = set()
+    for col in raw_df.columns:
+        match = re.match(r'^Q\((\d+)(?:_[^)]+)?\)', str(col))
+        if match:
+            question_ids.add(int(match.group(1)))
+
+    if not question_ids:
+        return None
+
+    # Reuse processed category ordering where possible (e.g. recognised scales).
+    processed_lookup = {}
+    for title, categories, _ in raw_audience_data or []:
+        processed_lookup[_normalise_question_text(title)] = list(categories)
+
+    questions = []
+    for q_id in sorted(question_ids):
+        prefix = f'Q({q_id})'
+        multi_cols = [
+            col for col in raw_df.columns
+            if re.match(rf'^Q\({q_id}_[^)]+\)', str(col))
+        ]
+        main_cols = [
+            col for col in raw_df.columns
+            if str(col).startswith(prefix)
+            and not re.match(rf'^Q\({q_id}_[^)]+\)', str(col))
+            and 'Comments' not in str(col)
+            and 'Sentiment' not in str(col)
+        ]
+
+        if multi_cols:
+            first_col = str(multi_cols[0])
+            match = re.search(r'\[Question:\s*(.*?)\]\s*$', first_col)
+            question_text = match.group(1).strip() if match else clean_chart_title(first_col)
+            categories = []
+            for col in multi_cols:
+                label = str(col).split('[', 1)[0].strip()
+                label = label.split(')', 1)[1].strip() if ')' in label else label
+                categories.append(label)
+            is_open_ended = False
+            valid_response_count = len(raw_df)
+            unique_answer_count = None
+        elif main_cols:
+            col = main_cols[0]
+            question_text = clean_chart_title(str(col))
+            series = raw_df[col].dropna()
+            valid_response_count = len(series)
+            unique_answer_count = series.astype(str).nunique()
+
+            # Long, mostly-unique verbatim answers are treated as open-ended.
+            total = len(series)
+            unique_ratio = (unique_answer_count / total) if total else 0
+            avg_length = series.astype(str).str.len().mean() if total else 0
+            is_open_ended = bool(
+                total > 0
+                and unique_answer_count > 20
+                and unique_ratio > 0.5
+                and avg_length > 20
+            )
+
+            if is_open_ended:
+                categories = []
+            else:
+                processed_categories = processed_lookup.get(_normalise_question_text(question_text))
+                if processed_categories:
+                    categories = processed_categories
+                else:
+                    # Preserve first-seen response order as a sensible fallback.
+                    categories = list(dict.fromkeys(series.astype(str).tolist()))
+        else:
+            continue
+
+        questions.append({
+            'q_id': q_id,
+            'text': question_text,
+            'categories': categories,
+            'is_open_ended': is_open_ended,
+            'valid_response_count': valid_response_count,
+            'unique_answer_count': unique_answer_count,
+            'is_screener': False,
+        })
+
+    # Explicit labels are always respected.
+    for q in questions:
+        lower_text = q['text'].lower()
+        if 'screener' in lower_text or 'screened in' in lower_text:
+            q['is_screener'] = True
+
+    # OnePulse appends screeners after the main questionnaire. A common export
+    # pattern is that only the qualifying answer remains, so the final question
+    # is unanimous across all exported respondents. Mark only trailing unanimous
+    # closed questions; this avoids misclassifying normal questions based on wording.
+    total_rows = len(raw_df)
+    for q in reversed(questions):
+        if q['is_screener']:
+            continue
+        is_unanimous_trailing_gate = (
+            not q['is_open_ended']
+            and q['unique_answer_count'] == 1
+            and q['valid_response_count'] == total_rows
+        )
+        if is_unanimous_trailing_gate:
+            q['is_screener'] = True
+        else:
+            break
+
+    return questions
+
+
+def _add_questions_summary_slides(prs, raw_audience_data, raw_df=None):
+    """Add one or more questionnaire summary slides."""
+    question_summary = _extract_question_summary(raw_df, raw_audience_data)
+
+    if question_summary is None:
+        # Backwards-compatible fallback for callers that do not pass raw_df.
+        question_summary = []
+        for idx, (q_title, categories, _) in enumerate(raw_audience_data or [], start=1):
+            lower_text = str(q_title).lower()
+            question_summary.append({
+                'q_id': _question_number_from_text(q_title) or idx,
+                'text': clean_chart_title(q_title),
+                'categories': list(categories),
+                'is_open_ended': False,
+                'is_screener': ('screener' in lower_text or 'screened in' in lower_text),
+            })
+
+    audience_labels = []
+    if raw_audience_data:
+        for label, _, n_resp in raw_audience_data[0][2]:
+            audience_labels.append(f"{label} ({n_resp})")
+
+    main_questions = [q for q in question_summary if not q['is_screener']]
+    screener_questions = [q for q in question_summary if q['is_screener']]
+
+    # Keep the slide readable: three questionnaire items per summary slide.
+    # Screeners are added to the final summary slide when space allows.
+    chunks = [main_questions[i:i + 3] for i in range(0, len(main_questions), 3)] or [[]]
+    if screener_questions and len(chunks[-1]) >= 3:
+        chunks.append([])
+
+    blank_layout = prs.slide_layouts[6] if len(prs.slide_layouts) > 6 else prs.slide_layouts[0]
+
+    for slide_idx, chunk in enumerate(chunks):
+        slide = prs.slides.add_slide(blank_layout)
+        clear_text(slide)
+
+        title_box = slide.shapes.add_textbox(Inches(0.75), Inches(0.45), Inches(11.5), Inches(0.5))
+        p = title_box.text_frame.paragraphs[0]
+        p.text = "Questions and audience" if slide_idx == 0 else "Questions and audience (continued)"
+        p.font.name = "Bally Thrill"
+        p.font.size = Pt(28)
+        p.font.color.rgb = RGBColor(0, 0, 0)
+
+        body_box = slide.shapes.add_textbox(Inches(0.75), Inches(1.2), Inches(11.5), Inches(5.8))
+        tf = body_box.text_frame
+        tf.clear()
+        tf.word_wrap = True
+        first_para = True
+
+        if slide_idx == 0 and audience_labels:
+            para = tf.paragraphs[0]
+            para.text = "Audience: " + ", ".join(audience_labels)
+            para.font.name = "Bally Thrill"
+            para.font.size = Pt(12)
+            para.font.bold = True
+            para.font.color.rgb = RGBColor(0, 0, 0)
+            para.space_after = Pt(12)
+            first_para = False
+
+        for q in chunk:
+            para = tf.paragraphs[0] if first_para else tf.add_paragraph()
+            first_para = False
+            para.text = f"{q['q_id']}. {q['text']}"
+            para.level = 0
+            para.font.name = "Bally Thrill"
+            para.font.size = Pt(12)
+            para.font.bold = True
+            para.font.color.rgb = RGBColor(0, 0, 0)
+            para.space_before = Pt(8)
+            para.space_after = Pt(2)
+
+            para = tf.add_paragraph()
+            if q['is_open_ended']:
+                para.text = "Response: Open-ended"
+            else:
+                para.text = "Response options: " + ", ".join(q['categories'])
+            para.level = 1
+            para.font.name = "Bally Thrill"
+            para.font.size = Pt(11)
+            para.font.bold = False
+            para.font.color.rgb = RGBColor(0, 0, 0)
+            para.space_after = Pt(9)
+
+        is_final_summary_slide = slide_idx == len(chunks) - 1
+        if is_final_summary_slide and screener_questions:
+            para = tf.paragraphs[0] if first_para else tf.add_paragraph()
+            first_para = False
+            para.text = "SCREENER:"
+            para.level = 0
+            para.font.name = "Bally Thrill"
+            para.font.size = Pt(12)
+            para.font.bold = True
+            para.font.color.rgb = RGBColor(0, 0, 0)
+            para.space_before = Pt(12)
+            para.space_after = Pt(2)
+
+            for q in screener_questions:
+                para = tf.add_paragraph()
+                para.text = q['text']
+                para.level = 0
+                para.font.name = "Bally Thrill"
+                para.font.size = Pt(12)
+                para.font.bold = True
+                para.font.color.rgb = RGBColor(0, 0, 0)
+                para.space_after = Pt(2)
+
+                para = tf.add_paragraph()
+                para.text = "Screened in: " + ", ".join(q['categories'])
+                para.level = 0
+                para.font.name = "Bally Thrill"
+                para.font.size = Pt(11)
+                para.font.bold = True
+                para.font.color.rgb = RGBColor(0, 0, 0)
+                para.space_after = Pt(8)
+
+    return prs
+
+
 def generate_presentation(
     raw_audience_data: List[Tuple[str, List[str], List[Tuple[str, List[float], int]]]],
     combined_data: List[Tuple[str, List[str], List[Tuple[str, List[float], int]]]],
     output_path: Optional[str] = None,
     group_audience_names: set = None,
     export_type: str = "full",
-    audience_defs: dict = None
+    audience_defs: dict = None,
+    raw_df=None
 ) -> None:
     """
     Generate the complete PowerPoint presentation using raw audience and combined data.
@@ -727,7 +974,7 @@ def generate_presentation(
     title_layout = prs.slide_layouts[0]
     s1 = prs.slides.add_slide(title_layout)
 
-        # Replace title slide placeholder text
+    # Replace title slide placeholder text
     text_shapes = [shape for shape in s1.shapes if shape.has_text_frame]
     text_shapes = sorted(text_shapes, key=lambda shape: shape.top)
 
@@ -739,119 +986,9 @@ def generate_presentation(
         text_shapes[1].text_frame.text = "Customer Research Team"
         set_text_style(text_shapes[1], font_size=24)
 
-    # Slide 2: questions and audience summary
-    blank_layout = prs.slide_layouts[6] if len(prs.slide_layouts) > 6 else prs.slide_layouts[0]
-    s2 = prs.slides.add_slide(blank_layout)
-    clear_text(s2)
-
-    title_box = s2.shapes.add_textbox(Inches(0.75), Inches(0.45), Inches(11.5), Inches(0.5))
-    p = title_box.text_frame.paragraphs[0]
-    p.text = "Questions and audience"
-    p.font.name = "Bally Thrill"
-    p.font.size = Pt(28)
-    p.font.color.rgb = RGBColor(0, 0, 0)
-
-    body_box = s2.shapes.add_textbox(Inches(0.75), Inches(1.2), Inches(11.5), Inches(5.8))
-    tf = body_box.text_frame
-    tf.clear()
-    tf.word_wrap = True
-
-    first_para = True
-
-    def is_screener_question(question_text: str) -> bool:
-        q = str(question_text).lower()
-        screener_keywords = [
-            "how often",
-            "do you place",
-            "have you",
-            "which of the following",
-            "screened in",
-            "screener"
-        ]
-        return any(keyword in q for keyword in screener_keywords)
-
-    # Audience summary
-    audience_labels = []
-    if raw_audience_data:
-        first_question_segments = raw_audience_data[0][2]
-        for label, vals, n_resp in first_question_segments:
-            audience_labels.append(f"{label} ({n_resp})")
-
-    if audience_labels:
-        para = tf.paragraphs[0]
-        para.text = "Audience: " + ", ".join(audience_labels)
-        para.font.name = "Bally Thrill"
-        para.font.size = Pt(12)
-        para.font.bold = True
-        para.font.color.rgb = RGBColor(0, 0, 0)
-        para.space_after = Pt(12)
-        first_para = False
-
-    main_questions = []
-    screener_questions = []
-
-    for q_title, categories, _ in raw_audience_data:
-        if is_screener_question(q_title):
-            screener_questions.append((q_title, categories))
-        else:
-            main_questions.append((q_title, categories))
-
-    # Numbered main questions
-    for i, (q_title, categories) in enumerate(main_questions, start=1):
-        if first_para:
-            para = tf.paragraphs[0]
-            first_para = False
-        else:
-            para = tf.add_paragraph()
-
-        para.text = f"{i}. {clean_chart_title(q_title)}"
-        para.level = 0
-        para.font.name = "Bally Thrill"
-        para.font.size = Pt(12)
-        para.font.bold = True
-        para.font.color.rgb = RGBColor(0, 0, 0)
-        para.space_before = Pt(8)
-        para.space_after = Pt(2)
-
-        para = tf.add_paragraph()
-        para.text = "Response options: " + ", ".join(categories)
-        para.level = 1
-        para.font.name = "Bally Thrill"
-        para.font.size = Pt(12)
-        para.font.bold = False
-        para.font.color.rgb = RGBColor(0, 0, 0)
-        para.space_after = Pt(10)
-
-    # Screener section
-    if screener_questions:
-        para = tf.add_paragraph()
-        para.text = "SCREENER:"
-        para.level = 0
-        para.font.name = "Bally Thrill"
-        para.font.size = Pt(12)
-        para.font.bold = True
-        para.font.color.rgb = RGBColor(0, 0, 0)
-        para.space_before = Pt(18)
-        para.space_after = Pt(2)
-
-        for q_title, categories in screener_questions:
-            para = tf.add_paragraph()
-            para.text = clean_chart_title(q_title)
-            para.level = 0
-            para.font.name = "Bally Thrill"
-            para.font.size = Pt(12)
-            para.font.bold = True
-            para.font.color.rgb = RGBColor(0, 0, 0)
-            para.space_after = Pt(2)
-
-            para = tf.add_paragraph()
-            para.text = "Screened in: " + ", ".join(categories)
-            para.level = 0
-            para.font.name = "Bally Thrill"
-            para.font.size = Pt(12)
-            para.font.bold = True
-            para.font.color.rgb = RGBColor(0, 0, 0)
-            para.space_after = Pt(8)
+    # Questionnaire summary slides. Use the raw export when available so the
+    # summary reflects the actual questionnaire, including open-ended questions.
+    prs = _add_questions_summary_slides(prs, raw_audience_data, raw_df=raw_df)
 
     # Validate export_type parameter
     if export_type not in ["full", "condensed"]:
