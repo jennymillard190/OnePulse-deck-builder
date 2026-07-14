@@ -3,6 +3,7 @@ from typing import List, Tuple, Dict, Optional
 import pandas as pd
 from . import config
 from .scale_helpers import order_scale_categories_and_values
+from .data_loader import coerce_multi_select_series
 import logging
 
 logger = logging.getLogger(__name__)
@@ -34,8 +35,11 @@ def compute_segment_values(
                 q_cols = [c for c in df_seg.columns if c.startswith(q_id.replace(')', '_'))]
                 for idx, cat in enumerate(cats):
                     col = next((c for c in q_cols if cat in c), None)
-                    # FIX: use .sum() on boolean column, not .notna()
-                    vals[idx] = df_seg[col].sum() / n_resp if col else 0.0
+                    if col:
+                        selected = coerce_multi_select_series(df_seg[col], cat)
+                        vals[idx] = int(selected.sum()) / n_resp
+                    else:
+                        vals[idx] = 0.0
         else:
             single_col = next((c for c in df_seg.columns if re.match(r'Q\(\d+\)', c) and '_' not in c and 'Comments' not in c), None)
             if single_col:
@@ -202,9 +206,12 @@ def process_multi_select_question(df, question_id, categories):
     for category in categories:
         col = category_to_col.get(category)
         if col:
-            # FIX: .sum() works correctly on boolean columns after data_loader fix
-            count = df[col].sum()
-            percentage = count / total_respondents
+            # Be defensive here as well as in the loader: Streamlit/session-state
+            # data can contain strings if an export format changes or a dataframe
+            # bypasses the normal load path.
+            selected = coerce_multi_select_series(df[col], category)
+            count = int(selected.sum())
+            percentage = count / total_respondents if total_respondents > 0 else 0.0
             values.append(percentage)
         else:
             values.append(0.0)

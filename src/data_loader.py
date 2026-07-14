@@ -6,6 +6,44 @@ import re
 from typing import Optional, Tuple, Dict, List, Any
 from . import config
 
+
+_TRUE_MULTI_SELECT_MARKERS = {"true", "1", "1.0", "yes", "y", "selected", "checked", "x", "✓"}
+def coerce_multi_select_series(series: pd.Series, expected_value: str) -> pd.Series:
+    """Return a boolean Series indicating whether each multi-select option was selected.
+
+    OnePulse exports have appeared with multi-select option columns represented as
+    booleans, 0/1 values, pandas string dtype, or text containing the selected
+    answer label. Normalising here keeps downstream percentage calculations
+    numeric and prevents string concatenation during ``Series.sum()``.
+    """
+    if pd.api.types.is_bool_dtype(series.dtype):
+        return series.fillna(False).astype(bool)
+
+    if pd.api.types.is_numeric_dtype(series.dtype):
+        numeric = pd.to_numeric(series, errors="coerce").fillna(0)
+        return numeric.ne(0)
+
+    text = series.fillna("").astype(str).str.strip()
+    normalised = text.str.casefold()
+    expected = str(expected_value).strip().casefold()
+
+    # Match the actual option label first so legitimate options such as
+    # "No", "False" or "0" are not mistaken for an unselected marker.
+    selected = normalised.eq(expected) if expected else pd.Series(False, index=series.index)
+
+    # Some exports use semicolon-separated text in the option cell.
+    if expected:
+        selected = selected | normalised.str.split(";").apply(
+            lambda parts: expected in {part.strip() for part in parts}
+        )
+
+    selected = selected | normalised.isin(_TRUE_MULTI_SELECT_MARKERS)
+
+    # Everything else, including explicit false/unselected markers and unknown
+    # text, is treated as not selected. This avoids counting a different answer
+    # label that may appear in a malformed or semicolon-separated cell.
+    return selected.astype(bool)
+
 def find_latest_export(suffix: Optional[str] = None) -> Optional[str]:
     """
     Find the most recent Excel file in the exports directory.
@@ -253,13 +291,15 @@ def process_dataframe(df: pd.DataFrame) -> pd.DataFrame:
     # Process age of children columns
     df = process_semicolon_separated_column(df, 'Age of children', '_child')
     
-    # Process multi-select questions
+    # Process multi-select questions. Do this regardless of pandas dtype because
+    # newer exports may load these columns as string, boolean, or numeric types.
     for col in df.columns:
-        if df[col].dtype == object and col not in ['Bank(s)', 'Age of children'] and re.match(r'Q\(\d+_\d+\)', col):
-            # Extract the expected value from the column name (the part before [Question:)
-            expected_value = col.split('[', 1)[0].split(')', 1)[1].strip()
-            # Convert to boolean: TRUE if the cell contains the expected value, FALSE otherwise
-            df[col] = df[col].fillna('').astype(str).str.contains(expected_value, regex=False).astype(bool)
+        if col in ['Bank(s)', 'Age of children']:
+            continue
+        if re.match(r'^Q\(\d+_[^)]+\)', str(col)):
+            # Extract the expected answer value from the column name (before [Question: ...]).
+            expected_value = str(col).split('[', 1)[0].split(')', 1)[1].strip()
+            df[col] = coerce_multi_select_series(df[col], expected_value)
     return df
 
 def load_file(file_path: str) -> pd.DataFrame:

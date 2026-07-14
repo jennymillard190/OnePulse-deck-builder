@@ -32,7 +32,7 @@ from src.data_processor import (
     identify_open_ended_questions
 )
 from src.ppt_generator import generate_presentation
-from src.data_loader import load_file
+from src.data_loader import load_file, coerce_multi_select_series
 def normalize_column_name(col_name):
     """
     Normalize column names for comparison by:
@@ -228,9 +228,9 @@ def process_multi_select_question(df, question_id, categories):
         # Find the column for this category
         cols = [col for col in df.columns if f'Q({question_id}_' in col and cat in col]
         if cols:
-            # Sum True values and divide by total responses
             col = cols[0]
-            count = df[col].sum()
+            selected = coerce_multi_select_series(df[col], cat)
+            count = int(selected.sum())
             pct = count / len(df) if len(df) > 0 else 0
             values.append(pct)
         else:
