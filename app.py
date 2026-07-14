@@ -346,7 +346,7 @@ if st.session_state.get('df') is not None and st.session_state.analysis_mode == 
                         # Generate the presentation
                         output_path = os.path.join(project_root, config.get_output_pptx_path(st.session_state.input_filename, export_type_key))
                         os.makedirs(os.path.dirname(output_path), exist_ok=True)
-                        generate_presentation(raw_audience_data, combined_data, output_path, export_type=export_type_key, audience_defs=audience_defs)
+                        generate_presentation(raw_audience_data, combined_data, output_path, export_type=export_type_key, audience_defs=audience_defs, raw_df=st.session_state.df)
                         st.success(f"Generated presentation at {output_path}")
                         
                         # Store file info in session state for download button outside form
